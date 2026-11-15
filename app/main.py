@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401  确保所有模型注册到 Base.metadata
 from .database import Base, engine
-from .routers import auth, routines, schedules, series
+from .routers import auth, free_blocks, routines, schedules, series
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(auth.router)
 app.include_router(routines.router)
 app.include_router(schedules.router)
 app.include_router(series.router)
+app.include_router(free_blocks.router)
 
 
 @app.get("/health", tags=["系统"])
