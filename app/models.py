@@ -111,6 +111,18 @@ class Schedule(Base):
     end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
     location: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    # 日程分类：general（普通）/ study（复习计划）等
+    category: Mapped[str] = mapped_column(
+        String(20), default="general", server_default="general", nullable=False
+    )
+    # 来源：manual（手动创建）/ template（系统模板生成）
+    source: Mapped[str] = mapped_column(
+        String(20), default="manual", server_default="manual", nullable=False
+    )
+    # 复习计划关联的考试，用于重新生成时精确清理旧日程
+    exam_id: Mapped[int | None] = mapped_column(
+        ForeignKey("exams.id", ondelete="CASCADE"), index=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -131,6 +143,10 @@ class Exam(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     subject: Mapped[str | None] = mapped_column(String(100))
     exam_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    # 难度 1-5 星，决定复习计划的提前天数与每日时长
+    difficulty: Mapped[int] = mapped_column(
+        Integer, default=3, server_default="3", nullable=False
+    )
     start_time: Mapped[dt.time | None] = mapped_column(Time)
     end_time: Mapped[dt.time | None] = mapped_column(Time)
     location: Mapped[str | None] = mapped_column(String(200))

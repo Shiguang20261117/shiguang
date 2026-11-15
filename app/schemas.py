@@ -144,8 +144,35 @@ class ScheduleRead(ORMModel):
     end_time: dt.time
     location: str | None
     status: str
+    category: str
+    source: str
+    exam_id: int | None
     created_at: dt.datetime
     updated_at: dt.datetime
+
+
+# --------------------------------------------------------------------------
+# 考试 exams
+# --------------------------------------------------------------------------
+class ExamCreate(BaseModel):
+    subject: str = Field(min_length=1, max_length=100)
+    exam_date: dt.date
+    difficulty: int = Field(default=3, ge=1, le=5, description="难度 1-5 星")
+
+
+class ExamRead(ORMModel):
+    id: int
+    subject: str
+    exam_date: dt.date
+    difficulty: int
+    created_at: dt.datetime
+
+
+class StudyPlanRead(BaseModel):
+    """复习计划生成结果。"""
+
+    created: list[ScheduleRead]
+    skipped_days: list[dt.date]
 
 
 # --------------------------------------------------------------------------

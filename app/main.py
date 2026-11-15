@@ -13,13 +13,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401  确保所有模型注册到 Base.metadata
 from .database import Base, engine
-from .routers import auth, free_blocks, routines, schedules, series
+from .migrations import run_migrations
+from .routers import auth, exams, free_blocks, routines, schedules, series
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # 使用 create_all 初始化建表；如需版本化迁移，可在此基础上接入 Alembic
     Base.metadata.create_all(bind=engine)
+    # 兼容已存在的旧库：幂等补齐新增字段
+    run_migrations(engine)
     yield
 
 
@@ -44,6 +47,7 @@ app.include_router(routines.router)
 app.include_router(schedules.router)
 app.include_router(series.router)
 app.include_router(free_blocks.router)
+app.include_router(exams.router)
 
 
 @app.get("/health", tags=["系统"])
