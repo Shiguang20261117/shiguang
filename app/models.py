@@ -1,0 +1,252 @@
+"""数据库 ORM 模型。
+
+约定 / 假设（需求未明确的部分）：
+- weekday 统一使用 Python ``date.weekday()`` 的约定：0=周一 ... 6=周日。
+  前端 JavaScript 的 ``getDay()`` 是 0=周日，接入时需自行转换。
+- 时间字段均为不带时区的本地时间（SQLite 中存 TIME / DATETIME）。
+- 所有业务表都通过 ``user_id`` 归属到用户，路由层按当前登录用户隔离数据。
+- schedules.status：pending / done / cancelled，默认 pending。
+- tasks.priority：low / medium / high，默认 medium；tasks.status：todo / doing / done。
+"""
+from __future__ import annotations
+
+import datetime as dt
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Time,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(120), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class Routine(Base):
+    """作息模板（每天/每周固定时间段的习惯）。"""
+
+    __tablename__ = "routines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=周一
+    start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ScheduleSeries(Base):
+    """周期日程系列：记录批量生成的规则，便于整体查询/删除。"""
+
+    __tablename__ = "schedule_series"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=周一
+    start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    start_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    schedules: Mapped[list[Schedule]] = relationship(
+        back_populates="series", cascade="all, delete-orphan"
+    )
+
+
+class Schedule(Base):
+    """单条日程（某一天的具体安排）。"""
+
+    __tablename__ = "schedules"
+    __table_args__ = (
+        Index("ix_schedules_user_date", "user_id", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    series_id: Mapped[int | None] = mapped_column(
+        ForeignKey("schedule_series.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    date: Mapped[dt.date] = mapped_column("date", Date, nullable=False)
+    start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    location: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    series: Mapped[ScheduleSeries | None] = relationship(back_populates="schedules")
+
+
+class Exam(Base):
+    __tablename__ = "exams"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(100))
+    exam_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    start_time: Mapped[dt.time | None] = mapped_column(Time)
+    end_time: Mapped[dt.time | None] = mapped_column(Time)
+    location: Mapped[str | None] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class PeriodicRule(Base):
+    """周期性规则（为后续自动生成日程预留的规则表）。"""
+
+    __tablename__ = "periodic_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    # daily / weekly / monthly
+    rule_type: Mapped[str] = mapped_column(String(20), default="weekly", nullable=False)
+    interval: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    weekday: Mapped[int | None] = mapped_column(Integer)  # 仅 weekly 使用，0=周一
+    day_of_month: Mapped[int | None] = mapped_column(Integer)  # 仅 monthly 使用
+    start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    start_date: Mapped[dt.date | None] = mapped_column(Date)
+    end_date: Mapped[dt.date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    due_date: Mapped[dt.date | None] = mapped_column(Date)
+    priority: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="todo", nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    slots: Mapped[list[TaskSlot]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+
+
+class TaskSlot(Base):
+    """任务被拆分到具体时间段的执行槽位。"""
+
+    __tablename__ = "task_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    date: Mapped[dt.date] = mapped_column("date", Date, nullable=False)
+    start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    task: Mapped[Task] = relationship(back_populates="slots")
+
+
+class Checkin(Base):
+    """打卡记录，可关联作息模板或任务。"""
+
+    __tablename__ = "checkins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    routine_id: Mapped[int | None] = mapped_column(
+        ForeignKey("routines.id", ondelete="SET NULL"), index=True
+    )
+    task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"), index=True
+    )
+    checkin_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    checkin_time: Mapped[dt.time | None] = mapped_column(Time)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class Notice(Base):
+    """通知；user_id 为空表示面向所有用户的广播通知。"""
+
+    __tablename__ = "notices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    notice_type: Mapped[str] = mapped_column(
+        String(20), default="system", nullable=False
+    )
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )

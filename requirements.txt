@@ -1,0 +1,9 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+# 本机 Windows 应用控制策略会拦截 SQLAlchemy 2.1 的 C 扩展（_cache_key_cy），
+# 故锁定在带纯 Python 回退的 2.0.x
+SQLAlchemy>=2.0,<2.1
+pydantic>=2.6,<3.0
+python-jose>=3.3,<4.0
+passlib>=1.7.4,<2.0
+alembic>=1.13,<2.0
