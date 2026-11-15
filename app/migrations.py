@@ -50,3 +50,87 @@ def run_migrations(engine: Engine) -> None:
                         "INTEGER NOT NULL DEFAULT 3"
                     )
                 )
+
+        # 旧版 tasks / task_slots 与任务排程模型不兼容（旧表无 week_start、
+        # target_count、duration_min，槽位用 is_completed）。旧表无业务数据，直接重建。
+        if "tasks" in tables:
+            columns = {col["name"] for col in inspector.get_columns("tasks")}
+            if "week_start" not in columns:
+                conn.execute(text("DROP TABLE IF EXISTS task_slots"))
+                conn.execute(text("DROP TABLE IF EXISTS tasks"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE tasks (
+                            id INTEGER NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            title VARCHAR(200) NOT NULL,
+                            week_start DATE NOT NULL,
+                            target_count INTEGER NOT NULL,
+                            duration_min INTEGER NOT NULL,
+                            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            PRIMARY KEY (id),
+                            FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE task_slots (
+                            id INTEGER NOT NULL,
+                            task_id INTEGER NOT NULL,
+                            date DATE NOT NULL,
+                            start_time TIME NOT NULL,
+                            end_time TIME NOT NULL,
+                            status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+                            schedule_id INTEGER,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            PRIMARY KEY (id),
+                            FOREIGN KEY(task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                            FOREIGN KEY(schedule_id) REFERENCES schedules (id)
+                                ON DELETE SET NULL
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_tasks_user_id ON tasks (user_id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_task_slots_task_id "
+                        "ON task_slots (task_id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_task_slots_schedule_id "
+                        "ON task_slots (schedule_id)"
+                    )
+                )
+
+        if "task_slots" in tables:
+            columns = {col["name"] for col in inspector.get_columns("task_slots")}
+            if "status" not in columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE task_slots ADD COLUMN status "
+                        "VARCHAR(20) NOT NULL DEFAULT 'scheduled'"
+                    )
+                )
+            if "schedule_id" not in columns:
+                conn.execute(
+                    text("ALTER TABLE task_slots ADD COLUMN schedule_id INTEGER")
+                )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_task_slots_schedule_id "
+                    "ON task_slots (schedule_id)"
+                )
+            )

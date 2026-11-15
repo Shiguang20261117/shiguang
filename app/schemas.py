@@ -152,6 +152,49 @@ class ScheduleRead(ORMModel):
 
 
 # --------------------------------------------------------------------------
+# 任务排程 tasks / task_slots
+# --------------------------------------------------------------------------
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    week_start: dt.date = Field(description="目标周的周一日期")
+    target_count: int = Field(ge=1, description="目标次数")
+    duration_min: int = Field(ge=1, le=1440, description="每次时长（分钟）")
+
+    @model_validator(mode="after")
+    def _check_week_start(self) -> "TaskCreate":
+        if self.week_start.weekday() != 0:
+            raise ValueError("week_start 必须是周一")
+        return self
+
+
+class TaskSlotRead(ORMModel):
+    id: int
+    date: dt.date
+    start_time: dt.time
+    end_time: dt.time
+    status: str
+    schedule_id: int | None
+
+
+class TaskRead(ORMModel):
+    id: int
+    title: str
+    week_start: dt.date
+    target_count: int
+    duration_min: int
+    status: str
+    created_at: dt.datetime
+    updated_at: dt.datetime
+    slots: list[TaskSlotRead] = []
+
+
+class TaskScheduleResult(BaseModel):
+    scheduled_count: int
+    shortage: int
+    slots: list[TaskSlotRead]
+
+
+# --------------------------------------------------------------------------
 # 考试 exams
 # --------------------------------------------------------------------------
 class ExamCreate(BaseModel):
@@ -166,6 +209,8 @@ class ExamRead(ORMModel):
     exam_date: dt.date
     difficulty: int
     created_at: dt.datetime
+    # 是否已经生成过复习计划（存在 source=template 的复习日程）
+    has_plan: bool = False
 
 
 class StudyPlanRead(BaseModel):

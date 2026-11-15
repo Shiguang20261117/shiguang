@@ -6,7 +6,8 @@
 - 时间字段均为不带时区的本地时间（SQLite 中存 TIME / DATETIME）。
 - 所有业务表都通过 ``user_id`` 归属到用户，路由层按当前登录用户隔离数据。
 - schedules.status：pending / done / cancelled，默认 pending。
-- tasks.priority：low / medium / high，默认 medium；tasks.status：todo / doing / done。
+- tasks.status：pending / scheduled，创建时为 pending，生成排期后为 scheduled。
+- task_slots.status：scheduled / done / missed，默认 scheduled。
 """
 from __future__ import annotations
 
@@ -182,6 +183,8 @@ class PeriodicRule(Base):
 
 
 class Task(Base):
+    """周期性任务目标，例如「本周跑步 4 次，每次 40 分钟」。"""
+
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -189,10 +192,13 @@ class Task(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    due_date: Mapped[dt.date | None] = mapped_column(Date)
-    priority: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="todo", nullable=False)
+    # 目标周的周一日期
+    week_start: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    target_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending", nullable=False
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -201,7 +207,9 @@ class Task(Base):
     )
 
     slots: Mapped[list[TaskSlot]] = relationship(
-        back_populates="task", cascade="all, delete-orphan"
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskSlot.date, TaskSlot.start_time",
     )
 
 
@@ -217,7 +225,14 @@ class TaskSlot(Base):
     date: Mapped[dt.date] = mapped_column("date", Date, nullable=False)
     start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
     end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
-    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # scheduled / done / missed
+    status: Mapped[str] = mapped_column(
+        String(20), default="scheduled", server_default="scheduled", nullable=False
+    )
+    # 同步写入 schedules 后回填，用于从槽位跳到周视图日程
+    schedule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("schedules.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

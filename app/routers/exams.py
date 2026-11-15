@@ -103,13 +103,31 @@ def _find_study_window(
 def list_exams(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[Exam]:
+) -> list[ExamRead]:
     stmt = (
         select(Exam)
         .where(Exam.user_id == current_user.id)
         .order_by(Exam.exam_date, Exam.id)
     )
-    return list(db.scalars(stmt).all())
+    exams = list(db.scalars(stmt).all())
+
+    planned_ids = set(
+        db.scalars(
+            select(Schedule.exam_id)
+            .where(
+                Schedule.user_id == current_user.id,
+                Schedule.source == "template",
+                Schedule.exam_id.is_not(None),
+            )
+            .distinct()
+        ).all()
+    )
+    return [
+        ExamRead.model_validate(exam).model_copy(
+            update={"has_plan": exam.id in planned_ids}
+        )
+        for exam in exams
+    ]
 
 
 @router.post("", response_model=ExamRead, status_code=status.HTTP_201_CREATED)

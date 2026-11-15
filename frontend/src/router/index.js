@@ -34,6 +34,12 @@ const routes = [
         meta: { title: '固定日常' },
       },
       {
+        path: 'exams',
+        name: 'exams',
+        component: () => import('@/views/ExamsView.vue'),
+        meta: { title: '考试' },
+      },
+      {
         path: 'profile',
         name: 'profile',
         component: () => import('@/views/ProfileView.vue'),
