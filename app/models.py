@@ -23,6 +23,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -241,23 +242,26 @@ class TaskSlot(Base):
 
 
 class Checkin(Base):
-    """打卡记录，可关联作息模板或任务。"""
+    """打卡记录：target_type 为 schedule（单条日程）或 periodic（固定日常）。"""
 
     __tablename__ = "checkins"
+    __table_args__ = (
+        # 同一用户、同一目标、同一天只能打卡一次
+        UniqueConstraint(
+            "user_id", "target_type", "target_id", "date",
+            name="uq_checkins_user_target_date",
+        ),
+        Index("ix_checkins_user_date", "user_id", "date"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    routine_id: Mapped[int | None] = mapped_column(
-        ForeignKey("routines.id", ondelete="SET NULL"), index=True
-    )
-    task_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tasks.id", ondelete="SET NULL"), index=True
-    )
-    checkin_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    checkin_time: Mapped[dt.time | None] = mapped_column(Time)
-    note: Mapped[str | None] = mapped_column(Text)
+    # schedule: target_id 指向 schedules.id；periodic: 指向 routines.id
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    date: Mapped[dt.date] = mapped_column("date", Date, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

@@ -5,9 +5,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import AddScheduleDialog from '@/components/AddScheduleDialog.vue'
 import EditScheduleDialog from '@/components/EditScheduleDialog.vue'
 import ScheduleDetailDialog from '@/components/ScheduleDetailDialog.vue'
+import { createCheckin, listCheckins } from '@/api/checkins'
+import { exportWeekPng } from '@/api/export'
+import { importTimetable } from '@/api/imports'
 import { listRoutines } from '@/api/routines'
 import { deleteSchedule, listSchedules } from '@/api/schedules'
 import { deleteSeries } from '@/api/series'
+import { useCheckinStore } from '@/stores/checkins'
 import { getErrorMessage } from '@/utils/error'
 import {
   WEEKDAY_LABELS,
@@ -35,11 +39,30 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogInitial = ref({})
 
+const checkinStore = useCheckinStore()
+// 已打卡目标集合，key 形如 schedule:12
+const checkedKeys = ref(new Set())
+const checkingIds = ref(new Set())
+
 const detailVisible = ref(false)
 const activeSchedule = ref(null)
 const editVisible = ref(false)
 const editTarget = ref(null)
 const deleteScopeVisible = ref(false)
+const exporting = ref(false)
+
+const importVisible = ref(false)
+const importText = ref('')
+const importing = ref(false)
+const importCreated = ref(null)
+const importErrors = ref([])
+
+const IMPORT_EXAMPLE = [
+  '周一 08:00-09:40 高等数学 [教一楼 301]',
+  '周三 10:00-11:40 大学英语 [文科楼 205]',
+  '周五 14:00-15:40 数据结构 【计算机楼 402】',
+  '周五 25:00-26:00 格式错误的课程',
+].join('\n')
 
 const hourLabels = Array.from({ length: END_HOUR - START_HOUR }, (_, index) => {
   const hour = START_HOUR + index
@@ -157,7 +180,16 @@ const PALETTE = [
   { background: '#fdf6dc', border: '#e0c878', color: '#7a6220' },
 ]
 
+// 分类配色：复习=绿色系，运动=蓝色系，其余按标题散列到暖色系
+const CATEGORY_PALETTE = {
+  study: { background: '#e8f3ec', border: '#9ec9ae', color: '#2f6446' },
+  sport: { background: '#e6effb', border: '#9dbce8', color: '#2f4d7f' },
+}
+
 function colorOf(schedule) {
+  const categoryPalette = CATEGORY_PALETTE[schedule.category]
+  if (categoryPalette) return categoryPalette
+
   let hash = 0
   for (const char of schedule.title || '') {
     hash = (hash * 31 + char.charCodeAt(0)) % 9973
@@ -214,10 +246,11 @@ async function loadWeekData() {
   try {
     const start = days.value[0].dateStr
     const end = days.value[6].dateStr
-    // 同时拉取本周日程与启用的固定日常；任一失败不影响另一部分展示
-    const [schedulesResult, routinesResult] = await Promise.allSettled([
+    // 同时拉取本周日程、启用的固定日常与已打卡记录；任一失败不影响另一部分展示
+    const [schedulesResult, routinesResult, checkinsResult] = await Promise.allSettled([
       listSchedules(start, end),
       listRoutines({ is_active: true }),
+      listCheckins(),
     ])
 
     if (schedulesResult.status === 'fulfilled') {
@@ -235,8 +268,62 @@ async function loadWeekData() {
       routines.value = []
       ElMessage.warning('固定日常加载失败，本周暂不显示')
     }
+
+    if (checkinsResult.status === 'fulfilled') {
+      const data = checkinsResult.value.data
+      checkedKeys.value = new Set(
+        (Array.isArray(data) ? data : [])
+          .filter((item) => item.target_type === 'schedule')
+          .map((item) => scheduleKey(item.target_id)),
+      )
+    }
   } finally {
     loading.value = false
+  }
+}
+
+function scheduleKey(scheduleId) {
+  return `schedule:${scheduleId}`
+}
+
+function isChecked(schedule) {
+  return checkedKeys.value.has(scheduleKey(schedule.id))
+}
+
+function isCheckingIn(schedule) {
+  return checkingIds.value.has(schedule.id)
+}
+
+function markChecked(scheduleId) {
+  const next = new Set(checkedKeys.value)
+  next.add(scheduleKey(scheduleId))
+  checkedKeys.value = next
+}
+
+async function doCheckin(schedule) {
+  if (isChecked(schedule) || isCheckingIn(schedule)) return
+
+  const pending = new Set(checkingIds.value)
+  pending.add(schedule.id)
+  checkingIds.value = pending
+
+  try {
+    await createCheckin({ target_type: 'schedule', target_id: schedule.id })
+    markChecked(schedule.id)
+    ElMessage.success(`已打卡：${schedule.title}`)
+    // 打卡后立即刷新统计，个人中心无需刷新即可看到最新数据
+    checkinStore.markChecked()
+  } catch (error) {
+    if (error.response?.status === 409) {
+      markChecked(schedule.id)
+      ElMessage.info('今天已经打过卡了')
+    } else {
+      ElMessage.error(getErrorMessage(error, '打卡失败'))
+    }
+  } finally {
+    const next = new Set(checkingIds.value)
+    next.delete(schedule.id)
+    checkingIds.value = next
   }
 }
 
@@ -248,8 +335,70 @@ function goToday() {
   weekStart.value = startOfWeek(new Date())
 }
 
+/** 导出当前周为 PNG：接口需要携带 token，故用 blob 下载而不是 a 标签直链 */
+async function exportWeek() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const start = days.value[0].dateStr
+    const response = await exportWeekPng(start)
+    const url = URL.createObjectURL(new Blob([response.data], { type: 'image/png' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `拾光周计划-${start}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success('本周计划已导出')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '导出失败，请稍后重试'))
+  } finally {
+    exporting.value = false
+  }
+}
+
 function minutesToTime(minutes) {
   return `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}:00`
+}
+
+function openImport() {
+  importText.value = ''
+  importCreated.value = null
+  importErrors.value = []
+  importVisible.value = true
+}
+
+function fillImportExample() {
+  importText.value = IMPORT_EXAMPLE
+}
+
+/** 解析并导入课表文本；成功后刷新当前周视图 */
+async function submitImport() {
+  if (importing.value) return
+  const text = importText.value.trim()
+  if (!text) {
+    ElMessage.warning('请先粘贴课表文本')
+    return
+  }
+
+  importing.value = true
+  try {
+    const { data } = await importTimetable(text)
+    importCreated.value = Number(data?.created) || 0
+    importErrors.value = Array.isArray(data?.errors) ? data.errors : []
+
+    if (importCreated.value > 0) {
+      ElMessage.success(`成功导入 ${importCreated.value} 条课程`)
+      await loadWeekData()
+    } else {
+      ElMessage.warning('没有成功导入的课程，请检查格式')
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '导入失败，请稍后重试'))
+  } finally {
+    importing.value = false
+  }
 }
 
 /** 点击空白格子：按点击的纵向位置换算开始时间，默认 1 小时 */
@@ -374,6 +523,8 @@ onMounted(loadWeekData)
           <el-button @click="goToday">本周</el-button>
           <el-button @click="shiftWeek(1)">下一周</el-button>
         </el-button-group>
+        <el-button @click="openImport">导入课表</el-button>
+        <el-button :loading="exporting" @click="exportWeek">导出本周</el-button>
         <el-button type="primary" @click="openCreateFromHeader">添加日程</el-button>
       </div>
     </div>
@@ -439,6 +590,18 @@ onMounted(loadWeekData)
               <span class="event-time">
                 {{ formatTime(schedule.start_time) }} - {{ formatTime(schedule.end_time) }}
               </span>
+              <button
+                type="button"
+                class="checkin-btn"
+                :class="{
+                  'is-checked': isChecked(schedule),
+                  'is-pending': isCheckingIn(schedule),
+                }"
+                :title="isChecked(schedule) ? '已打卡' : '打卡'"
+                @click.stop="doCheckin(schedule)"
+              >
+                {{ isChecked(schedule) ? '✓' : '打卡' }}
+              </button>
             </div>
           </div>
         </div>
@@ -480,6 +643,47 @@ onMounted(loadWeekData)
         <el-button @click="deleteScopeVisible = false">取消</el-button>
         <el-button type="danger" plain @click="confirmDeleteScope('single')">仅删除本次</el-button>
         <el-button type="danger" @click="confirmDeleteScope('series')">删除整个系列</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="importVisible" title="导入课表" width="580px" append-to-body>
+      <p class="import-hint">
+        每行一门课程，格式为「星期几 HH:MM-HH:MM 课程名 [地点]」，地点可省略；
+        星期支持 周一 / 星期一 / Mon 等写法，导入后按当前日期起 20 周重复。
+      </p>
+
+      <el-input
+        v-model="importText"
+        type="textarea"
+        :rows="9"
+        resize="vertical"
+        placeholder="周一 08:00-09:40 高等数学 [教一楼 301]"
+      />
+
+      <div class="import-example-head">
+        <span>格式示例</span>
+        <el-button link type="primary" size="small" @click="fillImportExample">填入示例</el-button>
+      </div>
+      <pre class="import-example">{{ IMPORT_EXAMPLE }}</pre>
+
+      <div v-if="importCreated !== null" class="import-result">
+        <p class="import-summary">成功导入 {{ importCreated }} 条课程</p>
+        <template v-if="importErrors.length">
+          <p class="import-failed-title">以下 {{ importErrors.length }} 行失败：</p>
+          <ul class="import-error-list">
+            <li v-for="item in importErrors" :key="item.line">
+              <span class="import-error-line">第 {{ item.line }} 行</span>
+              <span class="import-error-content">{{ item.content }}</span>
+              <span class="import-error-reason">{{ item.reason }}</span>
+            </li>
+          </ul>
+        </template>
+        <p v-else class="import-all-ok">所有行均导入成功。</p>
+      </div>
+
+      <template #footer>
+        <el-button @click="importVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="importing" @click="submitImport">解析并导入</el-button>
       </template>
     </el-dialog>
   </div>
@@ -658,6 +862,39 @@ onMounted(loadWeekData)
   white-space: nowrap;
 }
 
+.checkin-btn {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 3;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid rgba(60, 45, 30, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.checkin-btn:hover {
+  background: #fff;
+}
+
+.checkin-btn.is-pending {
+  opacity: 0.6;
+}
+
+.checkin-btn.is-checked,
+.checkin-btn.is-checked:hover {
+  border-color: #ddd5cc;
+  background: #f1ebe4;
+  color: #a89a8c;
+  cursor: default;
+}
+
 @media (max-width: 720px) {
   .week-scroll {
     max-height: none;
@@ -682,5 +919,95 @@ onMounted(loadWeekData)
 
 .delete-scope-list strong {
   color: var(--sg-text);
+}
+
+.import-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sg-text-3);
+}
+
+.import-example-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sg-text-2);
+}
+
+.import-example {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--sg-border);
+  border-radius: 8px;
+  background: #fffaf4;
+  color: var(--sg-text-2);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.import-result {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f5f1;
+}
+
+.import-summary {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sg-text);
+}
+
+.import-failed-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #b4541f;
+}
+
+.import-error-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.import-error-list li {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-left: 3px solid #e9a07a;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.import-error-line {
+  font-weight: 600;
+  color: #b4541f;
+}
+
+.import-error-content {
+  color: var(--sg-text-2);
+  word-break: break-all;
+}
+
+.import-error-reason {
+  color: var(--sg-text-3);
+}
+
+.import-all-ok {
+  margin: 0;
+  font-size: 12px;
+  color: #2f6446;
 }
 </style>

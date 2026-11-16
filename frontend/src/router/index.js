@@ -28,6 +28,12 @@ const routes = [
         meta: { title: '周视图' },
       },
       {
+        path: 'tasks',
+        name: 'tasks',
+        component: () => import('@/views/TasksView.vue'),
+        meta: { title: '任务' },
+      },
+      {
         path: 'routines',
         name: 'routines',
         component: () => import('@/views/RoutinesView.vue'),

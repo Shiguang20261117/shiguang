@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -195,6 +195,35 @@ class TaskScheduleResult(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# 打卡 checkins
+# --------------------------------------------------------------------------
+class CheckinCreate(BaseModel):
+    # schedule: 单条日程；periodic: 固定日常
+    target_type: Literal["schedule", "periodic"]
+    target_id: int
+
+
+class CheckinRead(ORMModel):
+    id: int
+    target_type: str
+    target_id: int
+    date: dt.date
+    created_at: dt.datetime
+
+
+class CheckinStats(BaseModel):
+    days: int
+    # 近 N 天打卡数
+    total: int
+    # 连续打卡天数
+    streak_days: int
+    # 近 N 天应完成日程的打卡比例（0-100）
+    completion_rate: float
+    # happy / normal / sad
+    mascot: Literal["happy", "normal", "sad"]
+
+
+# --------------------------------------------------------------------------
 # 考试 exams
 # --------------------------------------------------------------------------
 class ExamCreate(BaseModel):
@@ -273,6 +302,25 @@ class SeriesUpdate(BaseModel):
 class SeriesCreateResult(BaseModel):
     series: SeriesRead
     created_count: int
+
+
+# --------------------------------------------------------------------------
+# 课表文本导入
+# --------------------------------------------------------------------------
+class TimetableImportRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=50000)
+
+
+class TimetableImportError(BaseModel):
+    # 原始文本中的行号，从 1 开始
+    line: int
+    content: str
+    reason: str
+
+
+class TimetableImportResult(BaseModel):
+    created: int
+    errors: list[TimetableImportError] = []
 
 
 def apply_updates(obj: Any, data: dict[str, Any]) -> None:

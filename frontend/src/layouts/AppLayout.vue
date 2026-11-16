@@ -28,6 +28,7 @@ function handleLogout() {
 
         <nav class="app-nav">
           <RouterLink to="/week" class="nav-item">周视图</RouterLink>
+          <RouterLink to="/tasks" class="nav-item">任务</RouterLink>
           <RouterLink to="/routines" class="nav-item">固定日常</RouterLink>
           <RouterLink to="/exams" class="nav-item">考试</RouterLink>
           <RouterLink to="/profile" class="nav-item">个人中心</RouterLink>

@@ -43,35 +43,66 @@ def list_series(
     return result
 
 
-@router.post("", response_model=SeriesCreateResult, status_code=status.HTTP_201_CREATED)
-def create_series(
-    payload: SeriesCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> SeriesCreateResult:
-    series = ScheduleSeries(user_id=current_user.id, **payload.model_dump())
+def create_series_with_schedules(
+    db: Session,
+    *,
+    user_id: int,
+    title: str,
+    weekday: int,
+    start_time: dt.time,
+    end_time: dt.time,
+    start_date: dt.date,
+    end_date: dt.date,
+    location: str | None = None,
+) -> tuple[ScheduleSeries, list[Schedule]]:
+    """创建周期系列并按区间批量生成日程（不提交事务，由调用方决定提交/回滚）。
+
+    地点在 series 表没有对应字段，直接写入该系列的每条日程。
+    """
+    series = ScheduleSeries(
+        user_id=user_id,
+        title=title,
+        weekday=weekday,
+        start_time=start_time,
+        end_time=end_time,
+        start_date=start_date,
+        end_date=end_date,
+    )
     db.add(series)
     db.flush()  # 先拿到 series.id，供生成的 schedules 关联
 
     schedules: list[Schedule] = []
-    current_date = payload.start_date
+    current_date = start_date
     one_day = dt.timedelta(days=1)
-    while current_date <= payload.end_date:
-        if current_date.weekday() == payload.weekday:
+    while current_date <= end_date:
+        if current_date.weekday() == weekday:
             schedules.append(
                 Schedule(
-                    user_id=current_user.id,
+                    user_id=user_id,
                     series_id=series.id,
-                    title=payload.title,
+                    title=title,
                     date=current_date,
-                    start_time=payload.start_time,
-                    end_time=payload.end_time,
+                    start_time=start_time,
+                    end_time=end_time,
+                    location=location,
                     status="pending",
                 )
             )
         current_date += one_day
 
     db.add_all(schedules)
+    return series, schedules
+
+
+@router.post("", response_model=SeriesCreateResult, status_code=status.HTTP_201_CREATED)
+def create_series(
+    payload: SeriesCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SeriesCreateResult:
+    series, schedules = create_series_with_schedules(
+        db, user_id=current_user.id, **payload.model_dump()
+    )
     db.commit()
     db.refresh(series)
 

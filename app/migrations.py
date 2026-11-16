@@ -134,3 +134,40 @@ def run_migrations(engine: Engine) -> None:
                     "ON task_slots (schedule_id)"
                 )
             )
+
+        # 旧版 checkins（routine_id / task_id / checkin_date）与打卡模型不兼容，
+        # 直接重建为 target_type + target_id + date，并建立唯一索引防重复打卡。
+        if "checkins" in tables:
+            columns = {col["name"] for col in inspector.get_columns("checkins")}
+            if not {"target_type", "target_id", "date"} <= columns:
+                conn.execute(text("DROP TABLE IF EXISTS checkins"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE checkins (
+                            id INTEGER NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            target_type VARCHAR(20) NOT NULL,
+                            target_id INTEGER NOT NULL,
+                            date DATE NOT NULL,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            PRIMARY KEY (id),
+                            CONSTRAINT uq_checkins_user_target_date
+                                UNIQUE (user_id, target_type, target_id, date),
+                            FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_checkins_user_id "
+                        "ON checkins (user_id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_checkins_user_date "
+                        "ON checkins (user_id, date)"
+                    )
+                )
