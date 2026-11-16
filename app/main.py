@@ -21,6 +21,7 @@ from .routers import (
     export,
     free_blocks,
     imports,
+    notices,
     routines,
     schedules,
     series,
@@ -63,6 +64,7 @@ app.include_router(tasks.router)
 app.include_router(checkins.router)
 app.include_router(export.router)
 app.include_router(imports.router)
+app.include_router(notices.router)
 
 
 @app.get("/health", tags=["系统"])

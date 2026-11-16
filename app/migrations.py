@@ -7,6 +7,8 @@
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
+from .models import Notice
+
 
 def run_migrations(engine: Engine) -> None:
     if engine.dialect.name != "sqlite":
@@ -171,3 +173,11 @@ def run_migrations(engine: Engine) -> None:
                         "ON checkins (user_id, date)"
                     )
                 )
+
+        # 旧版 notices 是面向全站的广播通知（title / content），与调课通知模型
+        # 不兼容；旧表无业务数据，直接按新模型重建。
+        if "notices" in tables:
+            columns = {col["name"] for col in inspector.get_columns("notices")}
+            if "raw_text" not in columns:
+                conn.execute(text("DROP TABLE IF EXISTS notices"))
+                Notice.__table__.create(bind=conn)

@@ -8,6 +8,7 @@ import ScheduleDetailDialog from '@/components/ScheduleDetailDialog.vue'
 import { createCheckin, listCheckins } from '@/api/checkins'
 import { exportWeekPng } from '@/api/export'
 import { importTimetable } from '@/api/imports'
+import { confirmNotice, discardNotice, parseNotice } from '@/api/notices'
 import { listRoutines } from '@/api/routines'
 import { deleteSchedule, listSchedules } from '@/api/schedules'
 import { deleteSeries } from '@/api/series'
@@ -21,6 +22,7 @@ import {
   formatWeekRange,
   isSameDay,
   pad2,
+  parseDateStr,
   startOfWeek,
   timeToMinutes,
   toDateStr,
@@ -56,6 +58,14 @@ const importText = ref('')
 const importing = ref(false)
 const importCreated = ref(null)
 const importErrors = ref([])
+
+const noticeVisible = ref(false)
+const noticeText = ref('')
+const noticeParsing = ref(false)
+const noticeActing = ref(false)
+const noticeResult = ref(null)
+
+const NOTICE_EXAMPLE = '因老师出差，周三08:00的高等数学改到周五14:00-15:40'
 
 const IMPORT_EXAMPLE = [
   '周一 08:00-09:40 高等数学 [教一楼 301]',
@@ -401,6 +411,98 @@ async function submitImport() {
   }
 }
 
+function noticeActionLabel(action) {
+  if (action === 'cancel') return '取消课程'
+  if (action === 'change') return '调整时间'
+  return '未识别'
+}
+
+function openNotice() {
+  noticeText.value = ''
+  noticeResult.value = null
+  noticeVisible.value = true
+}
+
+function fillNoticeExample() {
+  noticeText.value = NOTICE_EXAMPLE
+}
+
+/** 解析通知文本，只展示结果，不直接修改日程 */
+async function submitNoticeParse() {
+  if (noticeParsing.value) return
+  const text = noticeText.value.trim()
+  if (!text) {
+    ElMessage.warning('请先粘贴调课通知')
+    return
+  }
+
+  noticeParsing.value = true
+  try {
+    const { data } = await parseNotice(text)
+    noticeResult.value = data
+    if (data?.action === 'none') {
+      ElMessage.warning('未能自动识别，请手动处理')
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '解析失败，请稍后重试'))
+  } finally {
+    noticeParsing.value = false
+  }
+}
+
+/** 确认后真正执行取消 / 改时间 */
+async function confirmNoticeResult() {
+  const result = noticeResult.value
+  if (!result || noticeActing.value) return
+
+  noticeActing.value = true
+  try {
+    const { data } = await confirmNotice(result.id)
+    ElMessage.success(data?.message || '已执行调课')
+    noticeVisible.value = false
+    noticeResult.value = null
+
+    // 跳到课程实际所在周，确保修改结果立刻可见
+    const targetDate = data?.schedule?.date || result.matched_schedule?.date
+    if (targetDate) {
+      weekStart.value = startOfWeek(parseDateStr(targetDate))
+    } else {
+      await loadWeekData()
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '执行失败'))
+  } finally {
+    noticeActing.value = false
+  }
+}
+
+/** 取消 / 丢弃解析结果，不修改日程 */
+async function discardNoticeResult() {
+  const result = noticeResult.value
+  if (!result || noticeActing.value) return
+
+  noticeActing.value = true
+  try {
+    await discardNotice(result.id)
+    ElMessage.info('已丢弃该通知')
+    noticeResult.value = null
+    noticeVisible.value = false
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '丢弃失败'))
+  } finally {
+    noticeActing.value = false
+  }
+}
+
+async function closeNoticeDialog() {
+  // 未识别的通知没有可执行动作，关闭时顺手丢弃，避免留下无用记录
+  if (noticeResult.value?.action === 'none') {
+    discardNotice(noticeResult.value.id).catch(() => {})
+  }
+  noticeResult.value = null
+  noticeVisible.value = false
+}
+
 /** 点击空白格子：按点击的纵向位置换算开始时间，默认 1 小时 */
 function onColumnClick(day, event) {
   const rect = event.currentTarget.getBoundingClientRect()
@@ -524,6 +626,7 @@ onMounted(loadWeekData)
           <el-button @click="shiftWeek(1)">下一周</el-button>
         </el-button-group>
         <el-button @click="openImport">导入课表</el-button>
+        <el-button @click="openNotice">调课通知</el-button>
         <el-button :loading="exporting" @click="exportWeek">导出本周</el-button>
         <el-button type="primary" @click="openCreateFromHeader">添加日程</el-button>
       </div>
@@ -684,6 +787,70 @@ onMounted(loadWeekData)
       <template #footer>
         <el-button @click="importVisible = false">关闭</el-button>
         <el-button type="primary" :loading="importing" @click="submitImport">解析并导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="noticeVisible" title="调课通知" width="560px" append-to-body>
+      <p class="import-hint">
+        粘贴老师发的调课通知，系统会识别「取消」「改到 / 调整至 / 换成」等关键词，
+        自动匹配你的课程。解析结果确认后才会修改日程。
+      </p>
+
+      <el-input
+        v-model="noticeText"
+        type="textarea"
+        :rows="4"
+        resize="vertical"
+        placeholder="如：因老师出差，周三08:00的高等数学改到周五14:00-15:40"
+      />
+
+      <div class="import-example-head">
+        <span>示例</span>
+        <el-button link type="primary" size="small" @click="fillNoticeExample">填入示例</el-button>
+      </div>
+      <pre class="import-example">{{ NOTICE_EXAMPLE }}</pre>
+
+      <div v-if="noticeResult" class="notice-card" :class="`is-${noticeResult.action}`">
+        <div class="notice-card-head">
+          <span class="notice-action">{{ noticeActionLabel(noticeResult.action) }}</span>
+          <span class="notice-confidence" :class="{ 'is-low': noticeResult.confidence === '低' }">
+            置信度：{{ noticeResult.confidence }}
+          </span>
+        </div>
+        <p class="notice-card-text">{{ noticeResult.message }}</p>
+        <p
+          v-if="noticeResult.action !== 'none' && noticeResult.confidence === '低'"
+          class="notice-card-hint"
+        >
+          匹配置信度较低，请确认课程与时间是否正确后再执行。
+        </p>
+      </div>
+
+      <template #footer>
+        <el-button @click="closeNoticeDialog">关闭</el-button>
+        <el-button
+          v-if="noticeResult && noticeResult.action !== 'none'"
+          :loading="noticeActing"
+          @click="discardNoticeResult"
+        >
+          取消（丢弃）
+        </el-button>
+        <el-button
+          v-if="noticeResult && noticeResult.action !== 'none'"
+          type="primary"
+          :loading="noticeActing"
+          @click="confirmNoticeResult"
+        >
+          确认执行
+        </el-button>
+        <el-button
+          v-else
+          type="primary"
+          :loading="noticeParsing"
+          @click="submitNoticeParse"
+        >
+          解析通知
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -1009,5 +1176,63 @@ onMounted(loadWeekData)
   margin: 0;
   font-size: 12px;
   color: #2f6446;
+}
+
+.notice-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--sg-border);
+  border-left: 3px solid #e09a6a;
+  border-radius: 10px;
+  background: #fffaf4;
+}
+
+.notice-card.is-cancel {
+  border-left-color: #d98a8a;
+  background: #fdf5f5;
+}
+
+.notice-card.is-none {
+  border-left-color: #b9b0a6;
+  background: #f7f5f1;
+}
+
+.notice-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.notice-action {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sg-text);
+}
+
+.notice-confidence {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e8f3ec;
+  color: #2f6446;
+  font-size: 11px;
+}
+
+.notice-confidence.is-low {
+  background: #fdf1e4;
+  color: #b4541f;
+}
+
+.notice-card-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--sg-text-2);
+}
+
+.notice-card-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #b4541f;
 }
 </style>

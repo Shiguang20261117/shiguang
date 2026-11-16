@@ -323,6 +323,38 @@ class TimetableImportResult(BaseModel):
     errors: list[TimetableImportError] = []
 
 
+# --------------------------------------------------------------------------
+# 调课通知 notices
+# --------------------------------------------------------------------------
+class NoticeParseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class NoticeParseResult(BaseModel):
+    """POST /api/notices/parse 的解析结果（不会直接修改日程）。"""
+
+    id: int
+    # cancel 取消课程 / change 调整时间 / none 无法识别
+    action: Literal["cancel", "change", "none"]
+    matched_schedule: ScheduleRead | None = None
+    # 展示用的新时间，如「周五 14:00-15:40」
+    new_time: str | None = None
+    confidence: Literal["高", "低"]
+    message: str
+
+
+class NoticeConfirmResult(BaseModel):
+    action: str
+    status: str
+    message: str
+    schedule: ScheduleRead | None = None
+
+
+class NoticeStatusResult(BaseModel):
+    status: str
+    message: str
+
+
 def apply_updates(obj: Any, data: dict[str, Any]) -> None:
     """把 exclude_unset 的更新字典写入 ORM 对象。"""
     for field, value in data.items():

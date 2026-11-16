@@ -268,20 +268,23 @@ class Checkin(Base):
 
 
 class Notice(Base):
-    """通知；user_id 为空表示面向所有用户的广播通知。"""
+    """调课通知：保存粘贴的原始文本与解析结果，确认后才真正修改日程。
+
+    status：pending（待确认）/ confirmed（已执行）/ discarded（已丢弃）。
+    parsed_json 存放解析结果（action、匹配的日程 id、新时间等）。
+    """
 
     __tablename__ = "notices"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    notice_type: Mapped[str] = mapped_column(
-        String(20), default="system", nullable=False
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    parsed_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending", nullable=False
     )
-    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
