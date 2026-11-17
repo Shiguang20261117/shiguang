@@ -18,6 +18,16 @@ def run_migrations(engine: Engine) -> None:
     tables = set(inspector.get_table_names())
 
     with engine.begin() as conn:
+        if "users" in tables:
+            columns = {col["name"] for col in inspector.get_columns("users")}
+            if "mascot_name" not in columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN mascot_name "
+                        "VARCHAR(50) NOT NULL DEFAULT '小光'"
+                    )
+                )
+
         if "schedules" in tables:
             columns = {col["name"] for col in inspector.get_columns("schedules")}
             if "category" not in columns:

@@ -1,8 +1,12 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
+import mascotHappy from '@/assets/mascot-happy.png'
+import mascotNormal from '@/assets/mascot-normal.png'
+import mascotSad from '@/assets/mascot-sad.png'
+import { updateMascotName } from '@/api/auth'
 import { useCheckinStore } from '@/stores/checkins'
 import { useAuthStore } from '@/stores/auth'
 import { getErrorMessage } from '@/utils/error'
@@ -14,23 +18,26 @@ const checkin = useCheckinStore()
 
 const avatarText = computed(() => (auth.user?.username || '拾').slice(0, 1).toUpperCase())
 
+const MASCOT_IMAGES = {
+  happy: mascotHappy,
+  normal: mascotNormal,
+  sad: mascotSad,
+}
+
 const MASCOT_META = {
   happy: {
     label: '元气满满',
     text: '完成率很高，继续保持这个节奏！',
-    mouth: 'M46 70 Q60 86 74 70',
     color: '#e8834a',
   },
   normal: {
     label: '平稳前行',
     text: '状态还不错，再完成几项就更棒了。',
-    mouth: 'M50 74 Q60 80 70 74',
     color: '#d9a441',
   },
   sad: {
     label: '有点低落',
     text: '完成率偏低，陪它一起把日程补上吧。',
-    mouth: 'M50 80 Q60 70 70 80',
     color: '#8fa6b8',
   },
 }
@@ -39,6 +46,31 @@ const completionRate = computed(() => Math.round(Number(checkin.stats.completion
 const mascotState = computed(() => checkin.stats.mascot || 'sad')
 const mascotMeta = computed(() => MASCOT_META[mascotState.value] || MASCOT_META.sad)
 const ringColor = computed(() => mascotMeta.value.color)
+const mascotImage = computed(() => MASCOT_IMAGES[mascotState.value] || MASCOT_IMAGES.sad)
+const mascotName = computed(() => auth.user?.mascot_name || '小光')
+
+async function handleRenameMascot() {
+  try {
+    const { value } = await ElMessageBox.prompt('给 mascot 起个新名字吧', '修改 mascot 名字', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: mascotName.value,
+      inputPlaceholder: '例如：小光',
+      inputValidator: (input) => {
+        const name = (input || '').trim()
+        if (!name) return '名字不能为空'
+        if (name.length > 20) return '名字最多 20 个字符'
+        return true
+      },
+    })
+    const { data } = await updateMascotName(value.trim())
+    auth.user = data
+    ElMessage.success('mascot 名字已更新')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(getErrorMessage(error, '改名失败，请稍后重试'))
+  }
+}
 
 async function loadStats() {
   try {
@@ -120,52 +152,13 @@ onMounted(loadStats)
 
           <div class="mascot-stage">
             <div class="mascot-glow" :class="`is-${mascotState}`"></div>
-            <svg class="mascot" viewBox="0 0 120 120" role="img" aria-label="Mascot 表情">
-              <circle cx="60" cy="60" r="46" fill="#ffe3cc" />
-              <circle cx="60" cy="18" r="6" fill="#f0a46b" />
-              <path d="M60 12 v-6" stroke="#f0a46b" stroke-width="3" stroke-linecap="round" />
-
-              <template v-if="mascotState === 'happy'">
-                <path
-                  d="M40 56 Q46 49 52 56"
-                  stroke="#8a5a3b"
-                  stroke-width="3"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M68 56 Q74 49 80 56"
-                  stroke="#8a5a3b"
-                  stroke-width="3"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-              </template>
-              <template v-else>
-                <circle cx="46" cy="55" r="4" fill="#8a5a3b" />
-                <circle cx="74" cy="55" r="4" fill="#8a5a3b" />
-              </template>
-
-              <path
-                :d="mascotMeta.mouth"
-                stroke="#8a5a3b"
-                stroke-width="3"
-                fill="none"
-                stroke-linecap="round"
-              />
-
-              <circle cx="38" cy="66" r="6" fill="#ffc6a8" opacity="0.7" />
-              <circle cx="82" cy="66" r="6" fill="#ffc6a8" opacity="0.7" />
-
-              <circle
-                v-if="mascotState === 'sad'"
-                cx="80"
-                cy="66"
-                r="3.4"
-                fill="#a9c9e6"
-                opacity="0.9"
-              />
-            </svg>
+            <img class="mascot-img" :src="mascotImage" :alt="`mascot ${mascotMeta.label}`" />
+            <div class="mascot-name-row">
+              <span class="mascot-name">{{ mascotName }}</span>
+              <el-button link type="primary" size="small" @click="handleRenameMascot">
+                改名
+              </el-button>
+            </div>
             <p class="mascot-title">{{ mascotMeta.label }}</p>
             <p class="mascot-sub">{{ mascotMeta.text }}</p>
           </div>
@@ -359,9 +352,9 @@ onMounted(loadStats)
 
 .mascot-glow {
   position: absolute;
-  top: 8px;
-  width: 150px;
-  height: 150px;
+  top: 0;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
   pointer-events: none;
 }
@@ -378,10 +371,52 @@ onMounted(loadStats)
   background: radial-gradient(circle, rgba(190, 210, 228, 0.4), transparent 70%);
 }
 
-.mascot {
+.mascot-img {
   position: relative;
-  width: 108px;
-  height: 108px;
+  height: 140px;
+  width: auto;
+  max-width: 180px;
+  object-fit: contain;
+  animation: mascot-float 4.2s ease-in-out infinite;
+  filter: drop-shadow(0 8px 10px rgba(176, 132, 102, 0.16));
+}
+
+@keyframes mascot-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot-img {
+    animation: none;
+  }
+}
+
+.mascot-name-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.mascot-name {
+  max-width: 150px;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sg-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mascot-name-row :deep(.el-button) {
+  font-size: 12px;
 }
 
 .mascot-title {

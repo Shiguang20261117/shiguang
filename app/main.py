@@ -21,6 +21,7 @@ from .routers import (
     export,
     free_blocks,
     imports,
+    mascot,
     notices,
     routines,
     schedules,
@@ -62,6 +63,7 @@ app.include_router(free_blocks.router)
 app.include_router(exams.router)
 app.include_router(tasks.router)
 app.include_router(checkins.router)
+app.include_router(mascot.router)
 app.include_router(export.router)
 app.include_router(imports.router)
 app.include_router(notices.router)

@@ -38,6 +38,9 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(120), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    mascot_name: Mapped[str] = mapped_column(
+        String(50), default="小光", server_default="小光", nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False

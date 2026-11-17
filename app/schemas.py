@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ORMModel(BaseModel):
@@ -34,8 +34,21 @@ class UserRead(ORMModel):
     id: int
     username: str
     email: str | None
+    mascot_name: str
     is_active: bool
     created_at: dt.datetime
+
+
+class MascotNameUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("mascot 名字不能为空")
+        return value
 
 
 class LoginRequest(BaseModel):

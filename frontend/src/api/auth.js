@@ -28,3 +28,7 @@ export async function loginUser(username, password) {
 export function fetchCurrentUser() {
   return http.get('/api/auth/me')
 }
+
+export function updateMascotName(name) {
+  return http.put('/api/mascot/name', { name })
+}
