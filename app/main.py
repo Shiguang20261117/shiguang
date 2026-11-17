@@ -12,8 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401  确保所有模型注册到 Base.metadata
-from .database import Base, engine
+from .database import Base, SessionLocal, engine
 from .migrations import run_migrations
+from .seed import DEMO_PASSWORD, DEMO_USERNAME, seed_demo_data
 from .routers import (
     auth,
     checkins,
@@ -36,6 +37,13 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # 兼容已存在的旧库：幂等补齐新增字段
     run_migrations(engine)
+    # 用户表为空时写入演示账号与示例数据
+    with SessionLocal() as db:
+        if seed_demo_data(db):
+            print(
+                f"[seed] 已创建演示账号 {DEMO_USERNAME} / {DEMO_PASSWORD} "
+                "并注入示例数据"
+            )
     yield
 
 

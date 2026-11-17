@@ -9,7 +9,7 @@ export function getErrorMessage(error, fallback = '请求失败，请稍后重�
     if (first?.msg) return String(first.msg)
   }
   if (error?.code === 'ERR_NETWORK' || error?.message === 'Network Error') {
-    return '无法连接后端服务，请确认 http://127.0.0.1:8000 已启动'
+    return '无法连接后端服务，请确认后端已启动且地址配置正确'
   }
   return fallback
 }
