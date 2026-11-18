@@ -6,16 +6,19 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
 
+_IS_SQLITE = settings.DATABASE_URL.startswith("sqlite")
+
 # SQLite 需要关闭线程检查（FastAPI 的同步路由在线程池中执行）
-connect_args = (
-    {"check_same_thread": False}
-    if settings.DATABASE_URL.startswith("sqlite")
-    else {}
+connect_args = {"check_same_thread": False} if _IS_SQLITE else {}
+
+engine = create_engine(
+    settings.DATABASE_URL,
+    connect_args=connect_args,
+    # 无服务器环境与 Supabase 连接池会回收空闲连接，取出前先探活
+    pool_pre_ping=not _IS_SQLITE,
 )
 
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-
-if settings.DATABASE_URL.startswith("sqlite"):
+if _IS_SQLITE:
 
     @event.listens_for(engine, "connect")
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:

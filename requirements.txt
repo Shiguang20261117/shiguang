@@ -8,3 +8,7 @@ python-jose>=3.3,<4.0
 passlib>=1.7.4,<2.0
 alembic>=1.13,<2.0
 pillow>=10.0,<14.0
+# Vercel 无服务器函数适配（ASGI -> Lambda/HTTP handler）
+mangum>=0.17,<1.0
+# PostgreSQL 驱动（Supabase / Vercel Postgres）
+psycopg[binary]>=3.1,<4.0

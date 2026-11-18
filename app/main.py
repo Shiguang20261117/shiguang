@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from . import models  # noqa: F401  确保所有模型注册到 Base.metadata
 from .database import Base, SessionLocal, engine
@@ -31,8 +32,8 @@ from .routers import (
 )
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
+def init_db() -> None:
+    """建表、补齐旧库结构、空库注入演示数据（幂等）。"""
     # 使用 create_all 初始化建表；如需版本化迁移，可在此基础上接入 Alembic
     Base.metadata.create_all(bind=engine)
     # 兼容已存在的旧库：幂等补齐新增字段
@@ -44,6 +45,11 @@ async def lifespan(_app: FastAPI):
                 f"[seed] 已创建演示账号 {DEMO_USERNAME} / {DEMO_PASSWORD} "
                 "并注入示例数据"
             )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
     yield
 
 
@@ -80,6 +86,14 @@ app.include_router(notices.router)
 @app.get("/health", tags=["系统"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/keepalive", tags=["系统"])
+def keepalive() -> dict[str, str]:
+    """数据库保活：执行 SELECT 1 唤醒数据库，并由定时任务定期访问。"""
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    return {"status": "alive"}
 
 
 if __name__ == "__main__":

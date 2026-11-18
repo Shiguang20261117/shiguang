@@ -10,10 +10,26 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _normalize_database_url(url: str) -> str:
+    """统一 PostgreSQL 连接串格式。
+
+    Vercel / Supabase 等平台下发的连接串常以 ``postgres://`` 或
+    ``postgresql://`` 开头，SQLAlchemy 无法识别前者，且默认驱动为 psycopg2；
+    这里统一改写为 ``postgresql+psycopg://``，由 requirements 中的
+    psycopg（v3）驱动连接。
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 class Settings:
-    # 默认使用项目根目录下的 shiguang.db
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", f"sqlite:///{(BASE_DIR / 'shiguang.db').as_posix()}"
+    # 默认使用项目根目录下的 shiguang.db；生产环境通过 DATABASE_URL 指向 PostgreSQL
+    DATABASE_URL: str = _normalize_database_url(
+        os.getenv(
+            "DATABASE_URL", f"sqlite:///{(BASE_DIR / 'shiguang.db').as_posix()}"
+        )
     )
     # 生产环境务必通过环境变量 SECRET_KEY 覆盖
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-only-secret-key-please-change-me")

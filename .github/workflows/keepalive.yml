@@ -1,0 +1,17 @@
+name: keep-alive
+on:
+  schedule:
+    - cron: '23 1 */2 * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 唤醒网站后端和数据库
+        run: curl -s -o /dev/null -w "%{http_code}\n" https://shiguang.vercel.app/api/keepalive
+      - name: 访问 Supabase API（计为平台活跃）
+        run: |
+          curl -s -o /dev/null -w "%{http_code}\n" \
+            -H "apikey: sb_publishable_6x7uzA11P2wDi_1dE6z6CQ_EUtHT-cL" \
+            -H "Authorization: Bearer sb_publishable_6x7uzA11P2wDi_1dE6z6CQ_EUtHT-cL" \
+            https://eazvibxcachexgelelqe.supabase.co/rest/v1/
