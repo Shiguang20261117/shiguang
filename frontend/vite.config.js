@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
+    // GitHub Pages 部署在 https://<user>.github.io/shiguang/ 子路径下；
+    // 开发环境仍使用根路径，避免本地访问 5173 端口时必须带 /shiguang/ 前缀
+    base: mode === 'production' ? '/shiguang/' : '/',
     plugins: [vue()],
     resolve: {
       alias: {

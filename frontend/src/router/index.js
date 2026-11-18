@@ -57,7 +57,8 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 生产构建时 BASE_URL 为 '/shiguang/'（GitHub Pages 子路径），开发时为 '/'
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 

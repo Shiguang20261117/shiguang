@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 唤醒网站后端和数据库
-        run: curl -s -o /dev/null -w "%{http_code}\n" https://shiguang.vercel.app/api/keepalive
+        run: curl -s -o /dev/null -w "%{http_code}\n" https://zjy2007.pythonanywhere.com/api/keepalive
       - name: 访问 Supabase API（计为平台活跃）
         run: |
           curl -s -o /dev/null -w "%{http_code}\n" \

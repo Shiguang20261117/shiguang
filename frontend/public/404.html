@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>拾光 · 日程管理</title>
+    <script>
+      // GitHub Pages 没有 SPA 回退规则：直接访问/刷新 /shiguang/xxx 会命中本页。
+      // 这里记录原始路径后回到应用入口，由 index.html 还原路由。
+      var path = location.pathname.replace(/^\/shiguang/, '') || '/'
+      sessionStorage.setItem('spa-redirect', path + location.search)
+      location.replace('/shiguang/')
+    </script>
+  </head>
+  <body></body>
+</html>

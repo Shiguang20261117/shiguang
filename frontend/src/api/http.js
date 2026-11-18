@@ -6,6 +6,9 @@ import { useAuthStore } from '@/stores/auth'
 // 生产环境在 .env.production 中配置真实后端地址。
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/'
 
+// GitHub Pages 部署在 /shiguang/ 子路径下，整页跳转时需带上该前缀
+const appBase = import.meta.env.BASE_URL.replace(/\/$/, '')
+
 const http = axios.create({
   baseURL,
   timeout: 15000,
@@ -29,10 +32,18 @@ http.interceptors.response.use(
       const isLoginRequest = String(error.config?.url || '').includes('/api/auth/login')
       auth.clearAuth()
 
-      if (!isLoginRequest && !window.location.pathname.startsWith('/login')) {
-        // 这里用整页跳转而不是 router.push，避免 http.js 与 router 互相引用
-        const redirect = encodeURIComponent(window.location.pathname)
-        window.location.replace(`/login?redirect=${redirect}`)
+      if (!isLoginRequest) {
+        const pathname = window.location.pathname
+        // 去掉部署子路径前缀，得到应用内路由路径
+        const appPath = appBase && pathname.startsWith(`${appBase}/`)
+          ? pathname.slice(appBase.length)
+          : pathname
+
+        if (appPath !== '/login') {
+          // 这里用整页跳转而不是 router.push，避免 http.js 与 router 互相引用
+          const redirect = encodeURIComponent(appPath)
+          window.location.replace(`${appBase}/login?redirect=${redirect}`)
+        }
       }
     }
     return Promise.reject(error)
